@@ -2,8 +2,19 @@
 FROM ubuntu:22.04
 
 # Update packages and install all the necessary tools
+# RUN apt-get update && apt-get install -y \
+#     default-jdk \
+#     maven \
+#     gcc \
+#     g++ \
+#     python3 \
+#     nodejs \
+#     npm \
+#     && rm -rf /var/lib/apt/lists/*
+
+# Inside Dockerfile, change this line:
 RUN apt-get update && apt-get install -y \
-    default-jdk \
+    openjdk-17-jdk \
     maven \
     gcc \
     g++ \
