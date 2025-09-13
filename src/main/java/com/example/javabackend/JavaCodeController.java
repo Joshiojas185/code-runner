@@ -340,74 +340,154 @@ public class JavaCodeController {
     
     // API endpoint for Java code with test cases
     @PostMapping("/run-java")
-    public Map<String, Object> runTestCases(@RequestBody Map<String, Object> requestBody) {
-        String javaCode = (String) requestBody.get("code");
-        java.util.List<Map<String, Object>> testCases = (java.util.List<Map<String, Object>>) requestBody.get("testCases");
 
-        File javaFile = new File(CLASS_NAME + ".java");
-        File testFile = new File(TEST_CLASS_NAME + ".java");
-        Map<String, Object> response = new HashMap<>();
+    // Inside JavaCodeController.java
 
-        try {
-            // Write user's code
-            try (FileWriter writer = new FileWriter(javaFile)) {
-                writer.write(javaCode);
-            }
-            
-            // Generate and write test code
-            String testCode = generateTestClass(testCases);
-            try (FileWriter writer = new FileWriter(testFile)) {
-                writer.write(testCode);
-            }
+// API endpoint for Java code with test cases
+@PostMapping("/run-java")
+public Map<String, Object> runTestCases(@RequestBody Map<String, Object> requestBody) {
+    String javaCode = (String) requestBody.get("code");
+    java.util.List<Map<String, Object>> testCases = (java.util.List<Map<String, Object>>) requestBody.get("testCases");
 
-            // Compile both files
-            JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
-            if (compiler == null) {
-                return Map.of("error", "JDK is not properly configured. Cannot find system Java compiler.");
-            }
+    File javaFile = new File(CLASS_NAME + ".java");
+    File testFile = new File(TEST_CLASS_NAME + ".java");
+    Map<String, Object> response = new HashMap<>();
 
-            int compilationResult = compiler.run(null, null, null, javaFile.getPath(), testFile.getPath());
-            if (compilationResult != 0) {
-                return Map.of("error", "Compilation failed.");
-            }
-
-            // Run the tests
-            URLClassLoader classLoader = new URLClassLoader(new URL[]{new File(".").toURI().toURL()});
-            Class<?> testClass = classLoader.loadClass(TEST_CLASS_NAME);
-
-            Launcher launcher = LauncherFactory.create();
-            SummaryGeneratingListener listener = new SummaryGeneratingListener();
-            launcher.registerTestExecutionListeners(listener);
-            
-            launcher.execute(LauncherDiscoveryRequestBuilder.request().selectors(
-                org.junit.platform.engine.discovery.DiscoverySelectors.selectClass(testClass)
-            ).build());
-
-            TestExecutionSummary summary = listener.getSummary();
-            response.put("passed", summary.getTestsSucceededCount());
-            response.put("failed", summary.getTestsFailedCount());
-            response.put("total", summary.getTestsFoundCount());
-            response.put("success", summary.getTestsFailedCount() == 0);
-            
-            if (summary.getTestsFailedCount() > 0) {
-                java.util.List<String> failures = new java.util.ArrayList<>();
-                for (TestExecutionSummary.Failure failure : summary.getFailures()) {
-                    failures.add(failure.getTestIdentifier().getDisplayName() + ": " + failure.getException().getMessage());
-                }
-                response.put("failures", failures);
-            }
-            
-        } catch (Exception e) {
-            response.put("error", "Server error during execution: " + e.getMessage());
-        } finally {
-            javaFile.delete();
-            testFile.delete();
-            new File(CLASS_NAME + ".class").delete();
-            new File(TEST_CLASS_NAME + ".class").delete();
+    try {
+        // Write user's code
+        try (FileWriter writer = new FileWriter(javaFile)) {
+            writer.write(javaCode);
+        }
+        
+        // Generate and write test code
+        String testCode = generateTestClass(testCases);
+        try (FileWriter writer = new FileWriter(testFile)) {
+            writer.write(testCode);
         }
 
-        return response;
+        // --- Corrected Compilation Step ---
+        String classpath = "target/classes" + 
+                           ":/root/.m2/repository/org/junit/platform/junit-platform-suite-api/1.10.3/junit-platform-suite-api-1.10.3.jar" + 
+                           ":/root/.m2/repository/org/junit/jupiter/junit-jupiter-engine/5.10.3/junit-jupiter-engine-5.10.3.jar" +
+                           ":/root/.m2/repository/org/junit/platform/junit-platform-launcher/1.10.3/junit-platform-launcher-1.10.3.jar" +
+                           ":/root/.m2/repository/org/junit/jupiter/junit-jupiter-api/5.10.3/junit-jupiter-api-5.10.3.jar" +
+                           ":/root/.m2/repository/org/opentest4j/opentest4j/1.3.0/opentest4j-1.3.0.jar" +
+                           ":/root/.m2/repository/org/apiguardian/apiguardian-api/1.1.2/apiguardian-api-1.1.2.jar";
+        
+        Process compileProcess = new ProcessBuilder("javac", "-cp", classpath, javaFile.getPath(), testFile.getPath()).start();
+        if (!compileProcess.waitFor(60, TimeUnit.SECONDS) || compileProcess.exitValue() != 0) {
+            String error = readInputStream(compileProcess.getErrorStream());
+            return Map.of("error", "Compilation failed:\n" + error);
+        }
+        // --- End of Corrected Compilation Step ---
+
+        // Run the tests
+        URLClassLoader classLoader = new URLClassLoader(new URL[]{new File(".").toURI().toURL()});
+        Class<?> testClass = classLoader.loadClass(TEST_CLASS_NAME);
+
+        Launcher launcher = LauncherFactory.create();
+        SummaryGeneratingListener listener = new SummaryGeneratingListener();
+        launcher.registerTestExecutionListeners(listener);
+        
+        launcher.execute(LauncherDiscoveryRequestBuilder.request().selectors(
+            org.junit.platform.engine.discovery.DiscoverySelectors.selectClass(testClass)
+        ).build());
+
+        TestExecutionSummary summary = listener.getSummary();
+        response.put("passed", summary.getTestsSucceededCount());
+        response.put("failed", summary.getTestsFailedCount());
+        response.put("total", summary.getTestsFoundCount());
+        response.put("success", summary.getTestsFailedCount() == 0);
+        
+        if (summary.getTestsFailedCount() > 0) {
+            java.util.List<String> failures = new java.util.ArrayList<>();
+            for (TestExecutionSummary.Failure failure : summary.getFailures()) {
+                failures.add(failure.getTestIdentifier().getDisplayName() + ": " + failure.getException().getMessage());
+            }
+            response.put("failures", failures);
+        }
+        
+    } catch (Exception e) {
+        response.put("error", "Server error during execution: " + e.getMessage());
+    } finally {
+        javaFile.delete();
+        testFile.delete();
+        new File(CLASS_NAME + ".class").delete();
+        new File(TEST_CLASS_NAME + ".class").delete();
     }
+
+    return response;
+}
+    
+    // public Map<String, Object> runTestCases(@RequestBody Map<String, Object> requestBody) 
+    // {
+    //     String javaCode = (String) requestBody.get("code");
+    //     java.util.List<Map<String, Object>> testCases = (java.util.List<Map<String, Object>>) requestBody.get("testCases");
+
+    //     File javaFile = new File(CLASS_NAME + ".java");
+    //     File testFile = new File(TEST_CLASS_NAME + ".java");
+    //     Map<String, Object> response = new HashMap<>();
+
+    //     try {
+    //         // Write user's code
+    //         try (FileWriter writer = new FileWriter(javaFile)) {
+    //             writer.write(javaCode);
+    //         }
+            
+    //         // Generate and write test code
+    //         String testCode = generateTestClass(testCases);
+    //         try (FileWriter writer = new FileWriter(testFile)) {
+    //             writer.write(testCode);
+    //         }
+
+    //         // Compile both files
+    //         JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
+    //         if (compiler == null) {
+    //             return Map.of("error", "JDK is not properly configured. Cannot find system Java compiler.");
+    //         }
+
+    //         int compilationResult = compiler.run(null, null, null, javaFile.getPath(), testFile.getPath());
+    //         if (compilationResult != 0) {
+    //             return Map.of("error", "Compilation failed.");
+    //         }
+
+    //         // Run the tests
+    //         URLClassLoader classLoader = new URLClassLoader(new URL[]{new File(".").toURI().toURL()});
+    //         Class<?> testClass = classLoader.loadClass(TEST_CLASS_NAME);
+
+    //         Launcher launcher = LauncherFactory.create();
+    //         SummaryGeneratingListener listener = new SummaryGeneratingListener();
+    //         launcher.registerTestExecutionListeners(listener);
+            
+    //         launcher.execute(LauncherDiscoveryRequestBuilder.request().selectors(
+    //             org.junit.platform.engine.discovery.DiscoverySelectors.selectClass(testClass)
+    //         ).build());
+
+    //         TestExecutionSummary summary = listener.getSummary();
+    //         response.put("passed", summary.getTestsSucceededCount());
+    //         response.put("failed", summary.getTestsFailedCount());
+    //         response.put("total", summary.getTestsFoundCount());
+    //         response.put("success", summary.getTestsFailedCount() == 0);
+            
+    //         if (summary.getTestsFailedCount() > 0) {
+    //             java.util.List<String> failures = new java.util.ArrayList<>();
+    //             for (TestExecutionSummary.Failure failure : summary.getFailures()) {
+    //                 failures.add(failure.getTestIdentifier().getDisplayName() + ": " + failure.getException().getMessage());
+    //             }
+    //             response.put("failures", failures);
+    //         }
+            
+    //     } catch (Exception e) {
+    //         response.put("error", "Server error during execution: " + e.getMessage());
+    //     } finally {
+    //         javaFile.delete();
+    //         testFile.delete();
+    //         new File(CLASS_NAME + ".class").delete();
+    //         new File(TEST_CLASS_NAME + ".class").delete();
+    //     }
+
+    //     return response;
+    // }
 
     private String generateTestClass(java.util.List<Map<String, Object>> testCases) {
         StringBuilder sb = new StringBuilder();
