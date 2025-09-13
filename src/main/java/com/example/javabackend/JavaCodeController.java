@@ -339,7 +339,7 @@ public class JavaCodeController {
     }
     
     // API endpoint for Java code with test cases
-    @PostMapping("/run-java")
+    // @PostMapping("/run-java")
 
     // Inside JavaCodeController.java
 
